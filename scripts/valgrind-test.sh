@@ -75,7 +75,10 @@ SET GLOBAL selective_log_tables_to_log='vg_cold.t,logs.*';
 SET GLOBAL selective_log_tables_to_log='vg_cold.t';
 SET GLOBAL selective_log_tables_to_log='';
 SET GLOBAL selective_log_schemas_to_log='vg_hot,vg_cold,a,b,c,d,e,f';
+SET GLOBAL selective_log_schemas_to_log='vg_hot:insert|update,vg_cold:dml';
+SET GLOBAL selective_log_tables_to_log='vg_cold.t:delete,logs.*:ddl';
 SET GLOBAL selective_log_schemas_to_log='vg_hot';
+SET GLOBAL selective_log_tables_to_log='';
 SET GLOBAL selective_log_log_file_path='/tmp/vg_selective2.json';
 
 -- erro de SQL (evento com error_code)

@@ -59,13 +59,100 @@ static bool ci_eq_qualified(const std::string &entry,
   return true;
 }
 
-static bool contains(const std::vector<std::string> &list,
-                     const char *s, size_t len)
+/* find entry by name; NULL when absent */
+static FilterEntry *find_entry(std::vector<FilterEntry> &list,
+                               const char *s, size_t len)
 {
   for (size_t i= 0; i < list.size(); i++)
-    if (ci_eq(list[i], s, len))
-      return true;
-  return false;
+    if (ci_eq(list[i].name, s, len))
+      return &list[i];
+  return NULL;
+}
+
+static void add_entry(std::vector<FilterEntry> &list,
+                      const std::string &name, unsigned cmds)
+{
+  FilterEntry *e= find_entry(list, name.data(), name.size());
+  if (e)
+    e->cmds|= cmds;                    /* duplicate: merge masks */
+  else
+  {
+    FilterEntry fresh;
+    fresh.name= name;
+    fresh.cmds= cmds;
+    list.push_back(fresh);
+  }
+}
+
+/*
+  Parse the optional ":cmd1|cmd2" qualifier. Returns true and fills *cmds
+  (CMD_ALL when there is no qualifier); false on unknown tokens.
+*/
+static bool parse_cmd_qualifier(const std::string &quals, unsigned *cmds)
+{
+  static const struct { const char *tok; unsigned mask; } cmd_tokens[]=
+  {
+    { "select",   CMD_SELECT },   { "insert", CMD_INSERT },
+    { "update",   CMD_UPDATE },   { "delete", CMD_DELETE },
+    { "replace",  CMD_REPLACE },  { "load",   CMD_LOAD },
+    { "call",     CMD_CALL },     { "create", CMD_CREATE },
+    { "alter",    CMD_ALTER },    { "drop",   CMD_DROP },
+    { "truncate", CMD_TRUNCATE }, { "rename", CMD_RENAME },
+    { "other",    CMD_OTHER },    { "dml",    CMD_DML },
+    { "ddl",      CMD_DDL },      { "all",    CMD_ALL }
+  };
+
+  *cmds= 0;
+  size_t pos= 0;
+  while (pos <= quals.size())
+  {
+    size_t bar= quals.find('|', pos);
+    if (bar == std::string::npos)
+      bar= quals.size();
+    std::string tok= quals.substr(pos, bar - pos);
+    /* trim */
+    while (!tok.empty() && is_space(tok[0]))
+      tok.erase(0, 1);
+    while (!tok.empty() && is_space(tok[tok.size() - 1]))
+      tok.erase(tok.size() - 1);
+
+    bool known= false;
+    for (size_t i= 0; i < sizeof(cmd_tokens) / sizeof(cmd_tokens[0]); i++)
+      if (tok == cmd_tokens[i].tok)
+      {
+        *cmds|= cmd_tokens[i].mask;
+        known= true;
+        break;
+      }
+    if (!known)
+      return false;
+
+    if (bar == quals.size())
+      break;
+    pos= bar + 1;
+  }
+  return *cmds != 0;
+}
+
+/*
+  Split "name[:quals]" and resolve the command mask. Returns false on a
+  bad qualifier.
+*/
+static bool split_cmd_qualifier(const std::string &token,
+                                std::string *name, unsigned *cmds)
+{
+  size_t colon= token.find(':');
+  if (colon == std::string::npos)
+  {
+    *name= token;
+    *cmds= CMD_ALL;
+    return true;
+  }
+  *name= token.substr(0, colon);
+  /* trim trailing spaces left between name and ':' */
+  while (!name->empty() && is_space((*name)[name->size() - 1]))
+    name->erase(name->size() - 1);
+  return parse_cmd_qualifier(token.substr(colon + 1), cmds);
 }
 
 /* Trim whitespace and lowercase. Backticks are handled per identifier
@@ -123,7 +210,15 @@ bool parse_filter_lists(const char *schemas_csv, const char *tables_csv,
   split_csv(schemas_csv, &raw_schemas);
   for (size_t i= 0; i < raw_schemas.size(); i++)
   {
-    std::string schema= strip_ticks(raw_schemas[i]);
+    std::string name;
+    unsigned cmds;
+    if (!split_cmd_qualifier(raw_schemas[i], &name, &cmds))
+    {
+      if (error)
+        *error= raw_schemas[i];
+      return false;
+    }
+    std::string schema= strip_ticks(name);
     /* schema names cannot contain a dot; catch table entries put in the
        wrong variable early */
     if (schema.empty() || schema.find('.') != std::string::npos)
@@ -132,15 +227,21 @@ bool parse_filter_lists(const char *schemas_csv, const char *tables_csv,
         *error= raw_schemas[i];
       return false;
     }
-    if (!contains(rules.schemas, schema.data(), schema.size()))
-      rules.schemas.push_back(schema);
+    add_entry(rules.schemas, schema, cmds);
   }
 
   std::vector<std::string> raw_tables;
   split_csv(tables_csv, &raw_tables);
   for (size_t i= 0; i < raw_tables.size(); i++)
   {
-    const std::string &tok= raw_tables[i];
+    std::string tok;
+    unsigned cmds;
+    if (!split_cmd_qualifier(raw_tables[i], &tok, &cmds))
+    {
+      if (error)
+        *error= raw_tables[i];
+      return false;
+    }
     size_t dot= tok.find('.');
     if (dot == std::string::npos ||           /* no dot at all        */
         dot == 0 ||                           /* empty schema part    */
@@ -148,7 +249,7 @@ bool parse_filter_lists(const char *schemas_csv, const char *tables_csv,
         tok.find('.', dot + 1) != std::string::npos) /* more than one dot */
     {
       if (error)
-        *error= tok;
+        *error= raw_tables[i];
       return false;
     }
     std::string schema= strip_ticks(tok.substr(0, dot));
@@ -156,20 +257,13 @@ bool parse_filter_lists(const char *schemas_csv, const char *tables_csv,
     if (schema.empty() || table.empty())
     {
       if (error)
-        *error= tok;
+        *error= raw_tables[i];
       return false;
     }
     if (table == "*")
-    {
-      if (!contains(rules.wildcard_schemas, schema.data(), schema.size()))
-        rules.wildcard_schemas.push_back(schema);
-    }
+      add_entry(rules.wildcard_schemas, schema, cmds);
     else
-    {
-      std::string qualified= schema + "." + table;
-      if (!contains(rules.tables, qualified.data(), qualified.size()))
-        rules.tables.push_back(qualified);
-    }
+      add_entry(rules.tables, schema + "." + table, cmds);
   }
 
   out->schemas.swap(rules.schemas);
@@ -178,25 +272,51 @@ bool parse_filter_lists(const char *schemas_csv, const char *tables_csv,
   return true;
 }
 
-bool match_schema(const FilterRules &rules, const char *db, size_t db_len)
+unsigned match_schema(const FilterRules &rules, const char *db, size_t db_len)
 {
+  unsigned cmds= 0;
   if (db == NULL || db_len == 0)
-    return false;
-  return contains(rules.schemas, db, db_len) ||
-         contains(rules.wildcard_schemas, db, db_len);
+    return 0;
+  for (size_t i= 0; i < rules.schemas.size(); i++)
+    if (ci_eq(rules.schemas[i].name, db, db_len))
+      cmds|= rules.schemas[i].cmds;
+  for (size_t i= 0; i < rules.wildcard_schemas.size(); i++)
+    if (ci_eq(rules.wildcard_schemas[i].name, db, db_len))
+      cmds|= rules.wildcard_schemas[i].cmds;
+  return cmds;
 }
 
-bool match_table(const FilterRules &rules, const char *db, size_t db_len,
-                 const char *table, size_t table_len)
+unsigned match_table(const FilterRules &rules, const char *db, size_t db_len,
+                     const char *table, size_t table_len)
 {
+  unsigned cmds= 0;
   if (db == NULL || table == NULL || db_len == 0 || table_len == 0)
-    return false;
-  if (contains(rules.wildcard_schemas, db, db_len))
-    return true;
+    return 0;
+  for (size_t i= 0; i < rules.wildcard_schemas.size(); i++)
+    if (ci_eq(rules.wildcard_schemas[i].name, db, db_len))
+      cmds|= rules.wildcard_schemas[i].cmds;
   for (size_t i= 0; i < rules.tables.size(); i++)
-    if (ci_eq_qualified(rules.tables[i], db, db_len, table, table_len))
-      return true;
-  return false;
+    if (ci_eq_qualified(rules.tables[i].name, db, db_len, table, table_len))
+      cmds|= rules.tables[i].cmds;
+  return cmds;
+}
+
+unsigned command_bit(const char *cmd)
+{
+  static const struct { const char *kw; unsigned bit; } keywords[]=
+  {
+    { "SELECT",   CMD_SELECT },   { "WITH",    CMD_SELECT },
+    { "INSERT",   CMD_INSERT },   { "UPDATE",  CMD_UPDATE },
+    { "DELETE",   CMD_DELETE },   { "REPLACE", CMD_REPLACE },
+    { "LOAD",     CMD_LOAD },     { "CALL",    CMD_CALL },
+    { "CREATE",   CMD_CREATE },   { "ALTER",   CMD_ALTER },
+    { "DROP",     CMD_DROP },     { "TRUNCATE", CMD_TRUNCATE },
+    { "RENAME",   CMD_RENAME }
+  };
+  for (size_t i= 0; i < sizeof(keywords) / sizeof(keywords[0]); i++)
+    if (strcmp(cmd, keywords[i].kw) == 0)
+      return keywords[i].bit;
+  return CMD_OTHER;
 }
 
 void extract_command(const char *query, size_t query_len,

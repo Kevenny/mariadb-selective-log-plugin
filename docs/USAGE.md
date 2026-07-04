@@ -76,6 +76,30 @@ Todas dinâmicas (`SET GLOBAL`), sem restart:
 | `selective_log_log_file_path` | VARCHAR | `selective_log.json` | Arquivo de log no modo FILE (relativo = datadir) |
 | `selective_log_min_duration_ms` | INT | `0` | Só loga queries mais lentas que N ms (0 = todas) |
 
+### Filtro por tipo de comando (por entrada)
+
+Toda entrada das duas listas aceita um qualificador opcional `:cmd1|cmd2`
+restringindo **quais comandos** são logados para aquele schema/tabela:
+
+```sql
+-- schema "vendas" só INSERT e UPDATE; schema "rh" tudo
+SET GLOBAL selective_log_schemas_to_log = 'vendas:insert|update, rh';
+
+-- tabela app.pedidos só DELETE; todo o schema logs só DML
+SET GLOBAL selective_log_tables_to_log = 'app.pedidos:delete, logs.*:dml';
+```
+
+Tokens válidos: `select`, `insert`, `update`, `delete`, `replace`, `load`,
+`call`, `create`, `alter`, `drop`, `truncate`, `rename`, `other`, e os
+grupos `dml` (insert|update|delete|replace|load), `ddl`
+(create|alter|drop|truncate|rename) e `all`. Sem qualificador = todos os
+comandos. Token desconhecido faz o `SET GLOBAL` falhar. Entradas duplicadas
+têm as máscaras mescladas (`a:insert, a:update` ≡ `a:insert|update`).
+
+O comando do statement é o mesmo do campo `command` (primeira palavra-chave
+do SQL, ignorando comentários); `WITH` (CTE) conta como `select`. Statements
+que não são classificáveis caem em `other`.
+
 ### Semântica dos filtros
 
 - **Ambas as listas vazias ⇒ nada é logado** (fail-safe: o plugin nunca vira

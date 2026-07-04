@@ -167,6 +167,47 @@ static void test_invalid_tokens()
   CHECK(untouched.schemas.size() == 1);  /* still the old contents */
 }
 
+static void test_command_qualifiers()
+{
+  using namespace selective_log;
+  FilterRules r;
+  std::string err;
+
+  CHECK(parse_filter_lists("vendas:insert|update, rh",
+                           "app.pedidos:delete, logs.*:dml", &r, &err));
+  CHECK(match_schema(r, "vendas", 6) == (CMD_INSERT | CMD_UPDATE));
+  CHECK(match_schema(r, "VENDAS", 6) == (CMD_INSERT | CMD_UPDATE));
+  CHECK(match_schema(r, "rh", 2) == CMD_ALL);      /* sem qualificador */
+  CHECK(match_table(r, "app", 3, "pedidos", 7) == CMD_DELETE);
+  CHECK(match_table(r, "app", 3, "outra", 5) == 0);
+  CHECK(match_table(r, "logs", 4, "qualquer", 8) == CMD_DML);
+  CHECK(match_schema(r, "logs", 4) == CMD_DML);    /* schema.* conta */
+
+  /* entradas duplicadas mesclam as máscaras */
+  CHECK(parse_filter_lists("a:insert, A:update", "", &r, &err));
+  CHECK(r.schemas.size() == 1);
+  CHECK(match_schema(r, "a", 1) == (CMD_INSERT | CMD_UPDATE));
+
+  /* grupos ddl/all e espaços em volta do qualificador */
+  CHECK(parse_filter_lists("s:ddl, v : insert | delete", "t.x:all", &r, &err));
+  CHECK(match_schema(r, "s", 1) == CMD_DDL);
+  CHECK(match_schema(r, "v", 1) == (CMD_INSERT | CMD_DELETE));
+  CHECK(match_table(r, "t", 1, "x", 1) == CMD_ALL);
+
+  /* qualificadores inválidos rejeitados com o token ofensor */
+  CHECK(!parse_filter_lists("s:banana", "", &r, &err));
+  CHECK(err == "s:banana");
+  CHECK(!parse_filter_lists("", "a.b:", &r, &err));
+  CHECK(!parse_filter_lists("s:", "", &r, &err));
+
+  /* mapeamento keyword -> bit */
+  CHECK(command_bit("INSERT") == CMD_INSERT);
+  CHECK(command_bit("TRUNCATE") == CMD_TRUNCATE);
+  CHECK(command_bit("WITH") == CMD_SELECT);        /* CTE ~ SELECT */
+  CHECK(command_bit("GRANT") == CMD_OTHER);
+  CHECK(command_bit("OTHER") == CMD_OTHER);
+}
+
 static std::string cmd(const char *q)
 {
   char buf[24];
@@ -221,6 +262,7 @@ int main()
   test_table_filter_cross_schema();
   test_wildcard();
   test_invalid_tokens();
+  test_command_qualifiers();
   test_extract_command();
   test_match_null_safety();
 

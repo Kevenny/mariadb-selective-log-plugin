@@ -33,8 +33,8 @@
   the hot path only takes read locks, so queries never serialize.
 */
 
-#define PLUGIN_VERSION      0x0004
-#define PLUGIN_STR_VERSION  "0.4.0"
+#define PLUGIN_VERSION      0x0005
+#define PLUGIN_STR_VERSION  "0.5.0"
 
 #include <my_global.h>
 #include <my_pthread.h>
@@ -88,7 +88,7 @@ static PSI_rwlock_info rwlock_key_list[]=
    detects the pristine 'O'-filled copy and triggers initialization.
    ------------------------------------------------------------------------ */
 
-#define STATE_MAGIC 0x53454C32          /* "SEL2" */
+#define STATE_MAGIC 0x53454C33          /* "SEL3" */
 #define STATE_TABLES_BUF 3968
 
 struct StatementState
@@ -98,7 +98,8 @@ struct StatementState
   unsigned long long start_ns;          /* CLOCK_MONOTONIC at dispatch     */
   int have_start;                       /* start_ns valid for this stmt    */
   int in_statement;                     /* between GENERAL_LOG and STATUS  */
-  int matched;                          /* some table matched the filter   */
+  unsigned int cmd_mask;                /* allowed CommandBits from table
+                                           matches accumulated so far      */
   int tables_truncated;                 /* tables[] overflowed             */
   unsigned int tables_len;
   char tables[STATE_TABLES_BUF];        /* "db.tbl,db.tbl,..."             */
@@ -414,15 +415,6 @@ static void parse_user_host(std::string *out,
   out->append(host_begin, (size_t)(host_end - host_begin));
 }
 
-/* First SQL keyword of the query — comment/paren-aware (filter_engine). */
-static void append_command(std::string *out,
-                           const char *query, unsigned int query_len)
-{
-  char buf[24];
-  selective_log::extract_command(query, query_len, buf, sizeof(buf));
-  out->append(buf);
-}
-
 /*
   Reset per-statement fields. Runs at every GENERAL_LOG (dispatch start),
   so a statement accumulates ALL its table events until GENERAL_STATUS —
@@ -434,7 +426,7 @@ static void state_begin_statement(StatementState *st,
                                   int with_start)
 {
   st->query_id= query_id;
-  st->matched= 0;
+  st->cmd_mask= 0;
   st->tables_len= 0;
   st->tables_truncated= 0;
   st->in_statement= 1;
@@ -531,21 +523,21 @@ static void handle_table_event(MYSQL_THD thd,
   const char *tbl= event->table.str;
   size_t tbl_len= event->table.length;
 
-  int explicit_match= 0;
-  int schema_match= 0;
+  unsigned explicit_cmds= 0;
+  unsigned schema_cmds= 0;
   mysql_rwlock_rdlock(&filter_lock);
   const FilterRules *rules= active_rules;
   if (rules)
   {
-    explicit_match= selective_log::match_table(*rules, db, db_len,
-                                               tbl, tbl_len);
-    if (!explicit_match && !st->matched)
-      schema_match= selective_log::match_schema(*rules, db, db_len);
+    explicit_cmds= selective_log::match_table(*rules, db, db_len,
+                                              tbl, tbl_len);
+    schema_cmds= selective_log::match_schema(*rules, db, db_len);
   }
   mysql_rwlock_unlock(&filter_lock);
 
   /* bookkeeping side-effect tables only count when explicitly filtered */
-  if (!explicit_match && is_internal_stats_table(db, db_len, tbl, tbl_len))
+  if (explicit_cmds == 0 && is_internal_stats_table(db, db_len,
+                                                    tbl, tbl_len))
     return;
 
   state_add_table(st, db, db_len, tbl, tbl_len);
@@ -554,8 +546,7 @@ static void handle_table_event(MYSQL_THD thd,
     state_add_table(st, event->new_database.str, event->new_database.length,
                     event->new_table.str, event->new_table.length);
 
-  if (explicit_match || schema_match)
-    st->matched= 1;
+  st->cmd_mask|= explicit_cmds | schema_cmds;
 }
 
 static void handle_status_event(MYSQL_THD thd,
@@ -566,20 +557,28 @@ static void handle_status_event(MYSQL_THD thd,
 
   StatementState *st= get_state(thd);
 
-  int log_it= st->matched && st->in_statement;
+  /* Which command is this statement? Needed for the per-entry command
+     qualifiers, and reused verbatim in the output. */
+  char cmdbuf[24];
+  selective_log::extract_command(event->general_query,
+                                 event->general_query_length,
+                                 cmdbuf, sizeof(cmdbuf));
+  const unsigned cmd_bit= selective_log::command_bit(cmdbuf);
 
-  if (!log_it)
+  unsigned allowed= st->in_statement ? st->cmd_mask : 0;
+
+  if (!(allowed & cmd_bit))
   {
+    /* fall back to the session-schema filter */
     mysql_rwlock_rdlock(&filter_lock);
     const FilterRules *rules= active_rules;
-    if (rules &&
-        selective_log::match_schema(*rules, event->database.str,
-                                    event->database.length))
-      log_it= 1;
+    if (rules)
+      allowed|= selective_log::match_schema(*rules, event->database.str,
+                                            event->database.length);
     mysql_rwlock_unlock(&filter_lock);
   }
 
-  if (!log_it)
+  if (!(allowed & cmd_bit))
     goto reset;
 
   {
@@ -653,8 +652,7 @@ static void handle_status_event(MYSQL_THD thd,
       if (have_tables && st->tables_truncated)
         line.append(",\"tables_truncated\":true");
       line.append(",\"command\":\"");
-      append_command(&line, event->general_query,
-                     event->general_query_length);
+      line.append(cmdbuf);
 
       if (duration_ms >= 0)
         snprintf(numbuf, sizeof(numbuf), "\",\"duration_ms\":%.3f",
@@ -701,8 +699,7 @@ static void handle_status_event(MYSQL_THD thd,
           sql.append(",...");
       }
       sql.append("','");
-      append_command(&sql, event->general_query,
-                     event->general_query_length);
+      sql.append(cmdbuf);
       sql.append("',");
 
       if (duration_ms >= 0)
@@ -724,7 +721,7 @@ static void handle_status_event(MYSQL_THD thd,
 
 reset:
   /* STATUS closes the statement: never log it twice. */
-  st->matched= 0;
+  st->cmd_mask= 0;
   st->tables_len= 0;
   st->tables_truncated= 0;
   st->have_start= 0;

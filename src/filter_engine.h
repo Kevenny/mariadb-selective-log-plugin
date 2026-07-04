@@ -34,14 +34,46 @@
 
 namespace selective_log {
 
+/*
+  Command-class bits for the per-entry command qualifiers
+  ("entry:cmd1|cmd2"). An entry without qualifier gets CMD_ALL.
+*/
+enum CommandBits : unsigned
+{
+  CMD_SELECT   = 1u << 0,
+  CMD_INSERT   = 1u << 1,
+  CMD_UPDATE   = 1u << 2,
+  CMD_DELETE   = 1u << 3,
+  CMD_REPLACE  = 1u << 4,
+  CMD_LOAD     = 1u << 5,
+  CMD_CALL     = 1u << 6,
+  CMD_CREATE   = 1u << 7,
+  CMD_ALTER    = 1u << 8,
+  CMD_DROP     = 1u << 9,
+  CMD_TRUNCATE = 1u << 10,
+  CMD_RENAME   = 1u << 11,
+  CMD_OTHER    = 1u << 12,
+  CMD_DML      = CMD_INSERT | CMD_UPDATE | CMD_DELETE | CMD_REPLACE |
+                 CMD_LOAD,
+  CMD_DDL      = CMD_CREATE | CMD_ALTER | CMD_DROP | CMD_TRUNCATE |
+                 CMD_RENAME,
+  CMD_ALL      = 0xFFFFFFFFu
+};
+
+struct FilterEntry
+{
+  std::string name;                    /* lowercase identifier(s)          */
+  unsigned cmds;                       /* union of CommandBits             */
+};
+
 struct FilterRules
 {
   /* From selective_log_schemas_to_log: lowercase schema names. */
-  std::vector<std::string> schemas;
+  std::vector<FilterEntry> schemas;
   /* From "schema.*" entries of selective_log_tables_to_log. */
-  std::vector<std::string> wildcard_schemas;
+  std::vector<FilterEntry> wildcard_schemas;
   /* From selective_log_tables_to_log: lowercase "schema.table". */
-  std::vector<std::string> tables;
+  std::vector<FilterEntry> tables;
 
   bool empty() const
   {
@@ -58,6 +90,12 @@ struct FilterRules
   - Table tokens must be schema.table; "schema.*" is accepted as a
     whole-schema wildcard (equivalent to listing the schema in the schema
     list). Anything else (missing dot, empty part, extra dot) is invalid.
+  - Every entry accepts an optional command qualifier after ':' —
+    "vendas:insert|update", "app.pedidos:delete", "logs.*:dml". Valid
+    tokens: select, insert, update, delete, replace, load, call, create,
+    alter, drop, truncate, rename, other, and the groups dml, ddl, all.
+    No qualifier means all commands. Unknown tokens make the parse fail.
+  - Duplicated entries have their command masks merged (OR).
   - NULL pointers are treated as empty lists.
 
   Returns true on success. On failure returns false and stores the
@@ -67,15 +105,27 @@ bool parse_filter_lists(const char *schemas_csv, const char *tables_csv,
                         FilterRules *out, std::string *error);
 
 /*
-  True if db matches the schema filter (schemas list or a schema.*
-  wildcard). Empty rules never match — callers get the "both lists empty
-  means log nothing" fail-safe for free.
+  Union of the command masks of every schema-filter entry matching db
+  (schemas list and schema.* wildcards). 0 = no match. Empty rules never
+  match — callers get the "both lists empty means log nothing" fail-safe
+  for free.
 */
-bool match_schema(const FilterRules &rules, const char *db, size_t db_len);
+unsigned match_schema(const FilterRules &rules,
+                      const char *db, size_t db_len);
 
-/* True if db.table matches the table filter (exact or schema.* wildcard). */
-bool match_table(const FilterRules &rules, const char *db, size_t db_len,
-                 const char *table, size_t table_len);
+/*
+  Union of the command masks of every table-filter entry matching
+  db.table (exact entries and schema.* wildcards). 0 = no match.
+*/
+unsigned match_table(const FilterRules &rules, const char *db, size_t db_len,
+                     const char *table, size_t table_len);
+
+/*
+  Map an uppercased keyword produced by extract_command() to its
+  CommandBits bit. WITH maps to CMD_SELECT (CTEs are overwhelmingly
+  selects); anything unknown maps to CMD_OTHER.
+*/
+unsigned command_bit(const char *cmd);
 
 /*
   Extract the first SQL keyword of query, uppercased ("SELECT", "INSERT",

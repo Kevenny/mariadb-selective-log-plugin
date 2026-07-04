@@ -208,3 +208,23 @@ os relógios são POSIX (`clock_gettime`/`gettimeofday`) e o blob da THDVAR é
 preenchido em `__attribute__((constructor))`. Porte mapeado (std::thread/
 std::chrono/DllMain, padrão do server_audit), mas exige toolchain MSVC para
 compilar a árvore do MariaDB.
+
+## D15. Filtro por tipo de comando (v0.5.0): qualificador por entrada
+
+Requisito: coletar só INSERT (ou UPDATE, DELETE...) por schema **e/ou** por
+tabela, com múltiplas entradas. Em vez de uma variável global de comandos
+(que não daria granularidade por entrada), cada item das listas ganhou um
+qualificador opcional `:cmd1|cmd2` (`vendas:insert|update`,
+`app.pedidos:delete`, `logs.*:dml`), com grupos `dml`/`ddl`/`all` e merge de
+máscaras em entradas duplicadas.
+
+Mecânica: o match de tabela/schema não devolve mais booleano e sim a
+**união das máscaras de comandos** das entradas que casaram (`CommandBits`,
+16 bits). Como os eventos TABLE acontecem antes de o comando ser conhecido
+com certeza, o estado por statement acumula a máscara permitida e a decisão
+final acontece no `GENERAL_STATUS`: `extract_command()` → `command_bit()` →
+loga se `(máscara_tabelas | máscara_schema_da_sessão) & bit`. Custo no hot
+path inalterado (mesmos locks; a comparação vira um AND).
+
+Limitação documentada: `WITH` (CTE) classifica como `select` — um
+`WITH ... UPDATE` seria tratado como select para fins de filtro por comando.
