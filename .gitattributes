@@ -8,3 +8,7 @@ Makefile text eol=lf
 CMakeLists.txt text eol=lf
 *.md text
 *.yml text eol=lf
+# arquivos MTR são sensíveis a CRLF
+*.test text eol=lf
+*.result text eol=lf
+*.inc text eol=lf
