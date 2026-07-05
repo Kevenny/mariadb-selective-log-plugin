@@ -350,3 +350,37 @@ o comportamento observável, os defaults (mask_passwords segue ON — mesmo num
 trace, proteger segredo por padrão é prudente; quem quer a query crua
 desliga). `CLAUDE.md` preservado com o nome antigo como documento histórico.
 Validado: 108 unitários, MTR, Valgrind sem leaks, funcional no 11.4 e 12.3.
+
+## D21. Code-review pass (v0.7.1): mask_secrets password-leak fix
+
+Adversarial code review + edge-case testing found one real defect (plus
+confirmed several non-bugs). Fixed:
+
+- **mask_secrets leaked credentials in three forms** the original code
+  didn't cover: unquoted hex hashes (`IDENTIFIED BY PASSWORD 0x1234...`,
+  `IDENTIFIED BY 0xDEAD...`), the MariaDB `VIA` connector (vs `WITH`), and
+  the `OLD_PASSWORD()` function. `mask_following_quote` now also recognizes
+  `0x...` hex literals; `mask_secrets` handles the `VIA` connector and
+  `OLD_PASSWORD`. Guarded against false positives: a `0x` literal outside a
+  credential context (e.g. `WHERE id = 0xFF`) is left untouched. 7 new unit
+  tests (115 total); validated end-to-end on a live server (hash absent from
+  the log, `***` present).
+
+Confirmed NOT bugs (verified against the MariaDB source, not assumed):
+
+- **deinit not holding filter_lock while freeing active_rules**: safe. The
+  server acquires an audit plugin per-THD (`my_plugin_lock` in
+  `sql_audit.cc:acquire_plugins`) and only lets UNINSTALL/deinit run once
+  every THD has released it — no callback can be in flight during deinit.
+- **file_writer_write lazy-open lock upgrade**: safe. A reopen/close needs
+  the wrlock, which is exclusive with the rdlock held around `logger_write`.
+- Server survived 14 adversarial edge cases (prepared statements,
+  multi-statement, unicode/emoji, transactions, USE, nested stored routines,
+  100k-char queries, syntax/runtime errors, a 300-reconnect storm, a
+  3200-insert concurrent TABLE-mode burst) with 0 crashes, 0 drops, 0
+  callback errors and 100% valid JSON.
+
+Known minor (not fixed): the status counters (`events_logged` etc.) are
+plain globals incremented without atomics, so under heavy concurrency the
+reported totals can slightly under-count. Diagnostic-only; never corrupts
+state. Would move to atomics if precise counts become a requirement.

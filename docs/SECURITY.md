@@ -67,9 +67,16 @@ replaces the literals of the following with `***`:
 - `PASSWORD('...')` / `PASSWORD '...'`
 - `SET PASSWORD ... = '...'`
 
+Also covers **unquoted hex hashes** (`0x1234ABCD`), the MariaDB `VIA`
+connector (`IDENTIFIED VIA plugin USING 0x...`) and the `OLD_PASSWORD()`
+function — all of which leaked in v0.7.0 and were fixed in v0.7.1 (found by
+the code-review pass, see D21).
+
 Case-insensitive matching, respects word boundaries (a `password_hash` column
 or the text `'my password'` in an ordinary INSERT does **not** trigger
-masking) and handles escaped quotes inside the secret. Can be turned off with
+masking; a `0x...` literal outside a credential context, e.g.
+`WHERE id = 0xFF`, is **not** masked either) and handles escaped quotes
+inside the secret. Can be turned off with
 `SET GLOBAL selective_trace_mask_passwords=OFF` if you need the intact text in
 a controlled environment.
 

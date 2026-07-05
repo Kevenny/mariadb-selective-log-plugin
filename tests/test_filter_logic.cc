@@ -284,6 +284,26 @@ static void test_mask_secrets()
      mascaramento indevido do valor de outra coluna */
   CHECK(mask("UPDATE t SET note='my password is safe' WHERE id=1") ==
         "UPDATE t SET note='my password is safe' WHERE id=1");
+
+  /* hashes hexadecimais sem aspas (0x...) também são mascarados */
+  CHECK(mask("CREATE USER x IDENTIFIED BY PASSWORD 0x1234ABCD") ==
+        "CREATE USER x IDENTIFIED BY PASSWORD 0x***");
+  CHECK(mask("GRANT ALL TO x IDENTIFIED BY 0xDEADBEEF") ==
+        "GRANT ALL TO x IDENTIFIED BY 0x***");
+  /* conector VIA (sintaxe MariaDB) + hash hex */
+  CHECK(mask("ALTER USER x IDENTIFIED VIA plug USING 0xAAAA") ==
+        "ALTER USER x IDENTIFIED VIA plug USING 0x***");
+  /* OLD_PASSWORD() function */
+  CHECK(mask("SET PASSWORD = OLD_PASSWORD('secret')") ==
+        "SET PASSWORD = OLD_PASSWORD('***')");
+  /* dois usuários numa CREATE USER: ambos mascarados */
+  CHECK(mask("CREATE USER a IDENTIFIED BY 'p1', b IDENTIFIED BY 'p2'") ==
+        "CREATE USER a IDENTIFIED BY '***', b IDENTIFIED BY '***'");
+  /* 0x fora de contexto de senha NÃO é mascarado (não é falso positivo) */
+  CHECK(mask("SELECT * FROM t WHERE id = 0xFF") ==
+        "SELECT * FROM t WHERE id = 0xFF");
+  CHECK(mask("INSERT INTO t VALUES (0xCAFE, 'x')") ==
+        "INSERT INTO t VALUES (0xCAFE, 'x')");
 }
 
 static void test_match_null_safety()

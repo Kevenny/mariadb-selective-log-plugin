@@ -36,8 +36,8 @@
   the hot path only takes read locks, so queries never serialize.
 */
 
-#define PLUGIN_VERSION      0x0008
-#define PLUGIN_STR_VERSION  "0.7.0"
+#define PLUGIN_VERSION      0x0009
+#define PLUGIN_STR_VERSION  "0.7.1"
 
 #include <my_global.h>
 #include <my_pthread.h>

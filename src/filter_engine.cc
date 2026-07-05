@@ -431,10 +431,13 @@ static bool kw_at(const char *q, size_t len, size_t i, const char *kw)
 }
 
 /*
-  From index i (just past a trigger keyword), skip spaces and an optional
-  leading "password"/"as"/"by"/"using" chain, then if a quoted string
-  follows, append *** in its place to out and return the index right after
-  the closing quote. Returns i unchanged (nothing appended) if no quote.
+  From index i (just past a trigger keyword), skip separators (spaces, '(',
+  '='), then replace the credential value with *** and return the index just
+  past it. Handles two value forms:
+    - a quoted string ('...' or "...", with backslash escapes), and
+    - an unquoted hex literal (0x1234ABCD / X'1234' — password hashes are
+      commonly given this way).
+  Returns i unchanged (nothing appended) if neither form follows.
 */
 static size_t mask_following_quote(const char *q, size_t len, size_t i,
                                    std::string *out, bool *masked)
@@ -445,30 +448,48 @@ static size_t mask_following_quote(const char *q, size_t len, size_t i,
     out->push_back(q[i]);
     i++;
   }
-  if (i >= len || (q[i] != '\'' && q[i] != '"'))
+  if (i >= len)
     return i;
 
-  char quote= q[i];
-  out->push_back(quote);
-  out->append("***");
-  i++;                                  /* opening quote consumed */
-  while (i < len)
+  if (q[i] == '\'' || q[i] == '"')
   {
-    if (q[i] == '\\' && i + 1 < len)    /* skip escaped char */
-    {
-      i+= 2;
-      continue;
-    }
-    if (q[i] == quote)
-      break;
-    i++;
-  }
-  if (i < len)                          /* closing quote */
-  {
+    char quote= q[i];
     out->push_back(quote);
-    i++;
+    out->append("***");
+    i++;                                /* opening quote consumed */
+    while (i < len)
+    {
+      if (q[i] == '\\' && i + 1 < len)  /* skip escaped char */
+      {
+        i+= 2;
+        continue;
+      }
+      if (q[i] == quote)
+        break;
+      i++;
+    }
+    if (i < len)                        /* closing quote */
+    {
+      out->push_back(quote);
+      i++;
+    }
+    *masked= true;
+    return i;
   }
-  *masked= true;
+
+  /* unquoted hex literal: 0x... */
+  if (i + 1 < len && q[i] == '0' && (q[i + 1] == 'x' || q[i + 1] == 'X'))
+  {
+    i+= 2;
+    while (i < len && ((q[i] >= '0' && q[i] <= '9') ||
+                       (q[i] >= 'a' && q[i] <= 'f') ||
+                       (q[i] >= 'A' && q[i] <= 'F')))
+      i++;
+    out->append("0x***");
+    *masked= true;
+    return i;
+  }
+
   return i;
 }
 
@@ -486,14 +507,17 @@ bool mask_secrets(const char *query, size_t query_len, std::string *out)
     {
       out->append(query + i, 10);
       i+= 10;
-      /* copy up to the connector keyword (BY/AS/USING), passing over an
-         optional "WITH <plugin>" */
+      /* copy up to the connector keyword (BY/AS/USING/VIA), passing over an
+         optional "WITH <plugin>" or "VIA <plugin>" */
       while (i < query_len)
       {
         if (kw_at(query, query_len, i, "BY"))       { out->append(query+i,2); i+=2; break; }
         if (kw_at(query, query_len, i, "AS"))       { out->append(query+i,2); i+=2; break; }
         if (kw_at(query, query_len, i, "USING"))    { out->append(query+i,5); i+=5; break; }
         if (query[i] == '\'' || query[i] == '"')    break; /* direct literal */
+        /* 0x hash right after IDENTIFIED (no connector) */
+        if (query[i] == '0' && i+1 < query_len &&
+            (query[i+1]=='x' || query[i+1]=='X'))   break;
         out->push_back(query[i]);
         i++;
       }
@@ -507,6 +531,14 @@ bool mask_secrets(const char *query, size_t query_len, std::string *out)
         out->append(query + j, 8);
         i= j + 8;
       }
+      i= mask_following_quote(query, query_len, i, out, &masked);
+      continue;
+    }
+    /* OLD_PASSWORD ( ... )  — the MySQL 4.x hash function */
+    if (kw_at(query, query_len, i, "OLD_PASSWORD"))
+    {
+      out->append(query + i, 12);
+      i+= 12;
       i= mask_following_quote(query, query_len, i, out, &masked);
       continue;
     }
