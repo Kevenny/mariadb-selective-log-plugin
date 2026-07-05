@@ -380,6 +380,13 @@ Confirmed NOT bugs (verified against the MariaDB source, not assumed):
   3200-insert concurrent TABLE-mode burst) with 0 crashes, 0 drops, 0
   callback errors and 100% valid JSON.
 
+All three platform builds regenerated at 0.7.1 (Ubuntu, EL8, 12.3/EL9) and
+the hash-masking fix validated end-to-end on both live series — MariaDB
+11.4.4 (test container) and 12.3.2 (OL9): the hash literal is absent from the
+log and `***` is present. Fixing the 12.3 incremental build surfaced a stale
+`plugin/selective_log` symlink left by the rename (two links to the same
+`src/` → duplicate CMake target); `build.sh` now removes it.
+
 Known minor (not fixed): the status counters (`events_logged` etc.) are
 plain globals incremented without atomics, so under heavy concurrency the
 reported totals can slightly under-count. Diagnostic-only; never corrupts
