@@ -9,9 +9,10 @@
 # ---------------------------------------------------------------------------
 set -uo pipefail
 
-echo ">> Instalando MariaDB 11.4 (RPM oficial) + plugin"
+MARIADB_SERIES="${MARIADB_SERIES:-11.4}"
+echo ">> Instalando MariaDB ${MARIADB_SERIES} (RPM oficial) + plugin"
 curl -LsS https://r.mariadb.com/downloads/mariadb_repo_setup \
-    | bash -s -- --mariadb-server-version=mariadb-11.4 >/dev/null 2>&1
+    | bash -s -- --mariadb-server-version=mariadb-${MARIADB_SERIES} >/dev/null 2>&1
 dnf -y install MariaDB-server MariaDB-client python3 >/dev/null 2>&1
 cp /plugin_out/selective_log.so /usr/lib64/mysql/plugin/
 mariadb-install-db --user=mysql >/dev/null 2>&1

@@ -53,9 +53,13 @@ RUN dnf -y install oracle-epel-release-el8 dnf-plugins-core && \
 # gcc-toolset-12 na frente do PATH (dispensa `scl enable`)
 ENV PATH="/opt/rh/gcc-toolset-12/root/usr/bin:${PATH}"
 
+# Pré-cria e dá posse dos possíveis mount points (11.4 e 12.3) a devuser,
+# senão volumes nomeados nascem como root e o clone/git falha.
 RUN useradd -u 1000 -ms /bin/bash devuser \
     && mkdir -p ${MARIADB_SRC_DIR} ${BUILD_DIR} /opt/ccache \
-    && chown -R devuser:devuser ${MARIADB_SRC_DIR} ${BUILD_DIR} /opt/ccache
+                /opt/mariadb-src-123 /opt/mariadb-build-123-ol8 \
+    && chown -R devuser:devuser ${MARIADB_SRC_DIR} ${BUILD_DIR} /opt/ccache \
+                /opt/mariadb-src-123 /opt/mariadb-build-123-ol8
 
 WORKDIR /workspace
 USER devuser

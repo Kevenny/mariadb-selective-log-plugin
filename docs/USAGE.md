@@ -11,18 +11,36 @@ que tocam schemas/tabelas configurados — uma alternativa de baixo overhead ao
 O plugin é um binário nativo — use o `.so` compilado para a plataforma do
 servidor:
 
-| Plataforma do servidor MariaDB | Build |
+| Plataforma / série do servidor | Build |
 |---|---|
-| Ubuntu 22.04+/Debian (glibc ≥ 2.35) | `build/plugin_output/selective_log.so` (container `dev`) |
-| Oracle Linux / RHEL / Rocky / Alma **8 e 9** | `build/plugin_output-ol8/selective_log.so` (container `dev-ol8`, glibc ≥ 2.17) |
+| Ubuntu 22.04+/Debian · MariaDB 11.4 (glibc ≥ 2.35) | `build/plugin_output/selective_log.so` (container `dev`) |
+| Oracle Linux / RHEL / Rocky / Alma **8 e 9** · MariaDB **11.4** | `build/plugin_output-ol8/selective_log.so` (container `dev-ol8`, glibc ≥ 2.17) |
+| Oracle Linux / RHEL 8+ · MariaDB **12.3+** | `build/plugin_output-123-ol9/selective_log.so` (container `dev-123-ol8`) |
 | Windows | não suportado nesta versão (código usa POSIX; porte viável, ver README) |
 
-O build EL8 requer só GLIBC_2.17+, então carrega em EL8, EL9 e distros mais
-novas. **Validado em Oracle Linux 8 e Oracle Linux 9**, ambos com MariaDB
-11.4.12 instalado via RPM oficial (mariadb.org), rodando o mesmo `.so` —
-smoke test completo (FILE, TABLE, JOIN cross-schema, UNINSTALL/INSTALL) nos
-dois. Compatível com qualquer servidor MariaDB **11.4.x**. Para outra série
-(10.11, 11.8...), recompile contra o fonte da série correspondente.
+Os builds EL exigem só GLIBC_2.17+, então carregam em EL8, EL9 e distros
+mais novas. **Validados em Oracle Linux 8 e 9** com os RPMs oficiais
+(mariadb.org), smoke test completo (FILE, TABLE, JOIN cross-schema,
+UNINSTALL/INSTALL):
+
+- **MariaDB 11.4.12** → `plugin_output-ol8/` (OL8 e OL9)
+- **MariaDB 12.3.2** → `plugin_output-123-ol9/` (OL9)
+
+> ⚠️ **A série do servidor importa**: a audit ABI mudou de `0x0302` (11.4)
+> para `0x0303` (12.3), então o `.so` de 11.4 **não** carrega num servidor
+> 12.3 e vice-versa. Use o build da série correspondente. Para outras séries
+> (10.11, 11.8...), recompile contra o fonte daquela série.
+
+Build para 12.3+:
+
+```bash
+docker compose -f docker/docker-compose.yml --profile v123 up -d --build dev-123-ol8
+docker exec mariadb-plugin-dev-123-ol8 bash -lc \
+  './scripts/download-mariadb-source.sh && ./scripts/build.sh full && ./scripts/build.sh --package'
+# valida num OL9 limpo com MariaDB 12.3 via RPM oficial:
+docker run --rm -i -v "$PWD/build/plugin_output-123-ol9:/plugin_out:ro" \
+    oraclelinux:9 bash < scripts/validate-123-ol9.sh
+```
 
 Para validar em OL9, o mesmo script serve (só muda a imagem):
 

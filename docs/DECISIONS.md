@@ -270,3 +270,31 @@ Injeção de SQL (modo default), injeção de JSON/nova-linha e falha graciosa
 de path já passavam. SELinux não é exercido no container de teste (kernel
 sem SELinux); o procedimento de rótulo do .so e do path de log está em
 docs/SECURITY.md para o host OL9 real com enforcing.
+
+## D18. Suporte a MariaDB 12.3+ (OL9): duas mudanças de ABI
+
+Investigação no fonte 12.3.2 (via build real, não suposição) revelou duas
+quebras de ABI frente à 11.4, tratadas sem tocar na lógica do plugin:
+
+1. **Audit interface 0x0302 → 0x0303**: as structs de evento ganharam
+   campos (`port` em general/table/connection; `tls_version` em connection),
+   inseridos **antes** de `database` em general/table — justamente os campos
+   que o plugin lê. Como usamos o macro `MYSQL_AUDIT_INTERFACE_VERSION` (não
+   o literal) e lemos os campos por nome, recompilar contra os headers 12.3
+   resolve versão e offsets automaticamente. Consequência: o `.so` do 11.4
+   (0x0302, struct menor) **não** é ABI-compatível com o servidor 12.3 — é
+   preciso um build dedicado (novo serviço `dev-123-ol8`, fonte/volumes
+   próprios, saída `build/plugin_output-123-ol9/`).
+
+2. **Logger service**: `logger_open()` ganhou um 4º argumento `buffer_size`
+   (o service passou a bufferizar internamente) e `logger_write` passou de
+   `const char*` para `const void*`. Tratado com um wrapper
+   `SELECTIVE_LOGGER_OPEN` selecionado por `#if MYSQL_VERSION_ID >= 120000`
+   (buffer_size=0 mantém o comportamento não-bufferizado); `line.data()`
+   (`const char*`) converte implicitamente para `const void*`, então o
+   `write` serve nas duas séries. O mesmo código-fonte compila em 11.4 e
+   12.3 — confirmado recompilando ambos.
+
+Matriz de artefatos: `plugin_output/` (Ubuntu/11.4), `plugin_output-ol8/`
+(EL8+/11.4), `plugin_output-123-ol9/` (EL8+/12.3+). Cada série do servidor
+precisa do binário compilado contra o fonte daquela série.

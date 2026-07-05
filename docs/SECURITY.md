@@ -22,6 +22,9 @@ garantido pelo MariaDB.
 
 ## Resultados da bateria (OL9, plugin v0.6.0)
 
+Bateria executada em duas séries do servidor, **7/7 em ambas**:
+MariaDB 11.4.12 e MariaDB 12.3.2 (RPMs oficiais em `oraclelinux:9`).
+
 | Teste | Vetor | Resultado |
 |---|---|---|
 | T1 | Injeção de SQL no INSERT interno (modo TABLE), `sql_mode` default | **PASS** — payload gravado como dado literal; `mysql.global_priv` intacta |

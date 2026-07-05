@@ -1,8 +1,8 @@
 # MariaDB Selective Query Log Plugin
 
-Plugin nativo (open source, GPLv2) para **MariaDB 11.4.4** que loga queries
-seletivamente **por schema** e/ou **por tabela** (cross-schema), como
-alternativa de baixo overhead ao `general_log`.
+Plugin nativo (open source, GPLv2) para **MariaDB 11.4 e 12.3+** que loga
+queries seletivamente **por schema**, **por tabela** (cross-schema) e **por
+tipo de comando**, como alternativa de baixo overhead ao `general_log`.
 
 **Status: implementado e validado** — filtros dinâmicos, saída FILE (JSON por
 linha) e TABLE (`mysql.selective_log_events`), duração em ms, benchmark e
@@ -123,6 +123,25 @@ docker run --rm -i -v "$PWD/build/plugin_output-ol8:/plugin_out:ro" \
 Validado contra MariaDB 11.4.12 (RPMs oficiais) em Oracle Linux 8 **e 9**
 (mesmo .so; para OL9 basta trocar a imagem para oraclelinux:9) — o plugin
 compilado contra o fonte 11.4.4 é compatível com toda a série 11.4.x.
+
+### 7. Build para MariaDB 12.3+ (Oracle Linux 9)
+
+A audit ABI mudou de `0x0302` (11.4) para `0x0303` (12.3), então o `.so` de
+11.4 **não** carrega num servidor 12.3. O mesmo código-fonte compila para as
+duas séries (wrapper por `MYSQL_VERSION_ID` para a mudança do logger
+service); só é preciso um build dedicado contra o fonte 12.3:
+
+```bash
+docker compose -f docker/docker-compose.yml --profile v123 up -d --build dev-123-ol8
+docker exec mariadb-plugin-dev-123-ol8 bash -lc \
+  './scripts/download-mariadb-source.sh && ./scripts/build.sh full && ./scripts/build.sh --package'
+# saída: build/plugin_output-123-ol9/selective_log.so
+docker run --rm -i -v "$PWD/build/plugin_output-123-ol9:/plugin_out:ro" \
+    oraclelinux:9 bash < scripts/validate-123-ol9.sh
+```
+
+Validado contra MariaDB 12.3.2 (RPM oficial) em Oracle Linux 9: plugin
+ACTIVE, smoke test completo e bateria de segurança 7/7.
 
 **Windows**: não suportado nesta versão — `log_writer_table` usa pthread,
 relógios POSIX e `__attribute__((constructor))`. O porte é viável

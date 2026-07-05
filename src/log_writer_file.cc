@@ -15,12 +15,26 @@
 
 #include <my_global.h>
 #include <my_pthread.h>
+#include <mysql_version.h>            /* MYSQL_VERSION_ID */
 #include <mysql/psi/mysql_thread.h>
 #include <mysql/service_logger.h>
 
 #include <cstdio>
 
 #include "log_writer_file.h"
+
+/*
+  Logger service ABI change in MariaDB 12.x: logger_open() gained a
+  buffer_size argument (the service now buffers internally). 0 keeps the
+  legacy unbuffered behavior. Wrap it so the call site stays version-clean.
+*/
+#if MYSQL_VERSION_ID >= 120000
+#  define SELECTIVE_LOGGER_OPEN(path, size, rot) \
+     logger_open((path), (size), (rot), 0)
+#else
+#  define SELECTIVE_LOGGER_OPEN(path, size, rot) \
+     logger_open((path), (size), (rot))
+#endif
 
 namespace selective_log {
 
@@ -65,7 +79,7 @@ static bool open_locked(const char *path)
 {
   if (path == NULL || path[0] == '\0')
     return false;
-  log_handle= logger_open(path, NO_ROTATION_SIZE, 0);
+  log_handle= SELECTIVE_LOGGER_OPEN(path, NO_ROTATION_SIZE, 0);
   if (log_handle == NULL)
   {
     if (!open_failed_logged)

@@ -55,6 +55,37 @@ services:
       - ol8
 
   # ---------------------------------------------------------------------
+  # Build para MariaDB 12.3+ em Oracle Linux / RHEL 8+ (audit interface
+  # 0x0303). Fonte, build e ccache em volumes próprios — o .so 11.4 (0x0302)
+  # NÃO é ABI-compatível com o servidor 12.3, então precisa deste build.
+  #   docker compose -f docker/docker-compose.yml --profile v123 up -d --build dev-123-ol8
+  #   docker exec mariadb-plugin-dev-123-ol8 bash -lc \
+  #     './scripts/download-mariadb-source.sh && ./scripts/build.sh full && ./scripts/build.sh --package'
+  # ---------------------------------------------------------------------
+  dev-123-ol8:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.ol8
+    container_name: mariadb-plugin-dev-123-ol8
+    volumes:
+      - ..:/workspace
+      - mariadb-src-123:/opt/mariadb-src-123
+      - mariadb-build-123-ol8:/opt/mariadb-build-123-ol8
+      - ccache-123-ol8:/opt/ccache
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    environment:
+      - MARIADB_VERSION=12.3.2
+      - MARIADB_SRC_DIR=/opt/mariadb-src-123
+      - BUILD_DIR=/opt/mariadb-build-123-ol8
+      - PLUGIN_OUTPUT_DIR=/workspace/build/plugin_output-123-ol9
+    networks:
+      - plugin-dev-net
+    profiles:
+      - v123
+
+  # ---------------------------------------------------------------------
   # Container "limpo" apenas para validar o plugin compilado, simulando
   # um ambiente de produção MariaDB 11.4.4 oficial
   # ---------------------------------------------------------------------
@@ -78,10 +109,13 @@ services:
 
 volumes:
   mariadb-src:
+  mariadb-src-123:
   mariadb-build:
   mariadb-build-ol8:
+  mariadb-build-123-ol8:
   ccache-data:
   ccache-ol8:
+  ccache-123-ol8:
 
 networks:
   plugin-dev-net:
