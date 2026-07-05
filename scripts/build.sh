@@ -21,6 +21,12 @@ MODE="${1:-full}"
 
 link_plugin_source() {
     echo ">> Linking plugin source (src/) into the MariaDB plugin tree"
+    # Remove a stale link from the old plugin name (selective_log): two links
+    # to the same src/ make CMake try to create the target twice (CMP0002).
+    if [ -L "${MARIADB_SRC_DIR}/plugin/selective_log" ]; then
+        rm -f "${MARIADB_SRC_DIR}/plugin/selective_log"
+        echo "   Removed stale link: plugin/selective_log"
+    fi
     local target="${MARIADB_SRC_DIR}/plugin/${PLUGIN_LINK_NAME}"
     if [ ! -L "${target}" ]; then
         rm -rf "${target}"
