@@ -78,8 +78,14 @@ jobs:
             -v "$PWD/ccache-${{ matrix.series }}:/opt/ccache" \
             -e MARIADB_VERSION -e MARIADB_SRC_DIR -e BUILD_DIR -e CCACHE_DIR \
             sl-build sleep infinity
-          docker exec -u root sl chown -R devuser:devuser \
-            "$MARIADB_SRC_DIR" "$BUILD_DIR" /opt/ccache || true
+          # BUILD_DIR may not exist in the image (the Dockerfile only creates
+          # the -ol8 variants) and devuser can't mkdir under /opt (root-owned),
+          # so create and hand it over as root before building. The container
+          # already carries the env from docker run's -e, so do NOT pass -e to
+          # exec (that would override them with empty values).
+          docker exec -u root sl bash -c \
+            'mkdir -p "$MARIADB_SRC_DIR" "$BUILD_DIR" /opt/ccache &&
+             chown -R devuser:devuser "$MARIADB_SRC_DIR" "$BUILD_DIR" /opt/ccache'
           docker exec sl bash -lc 'bash scripts/download-mariadb-source.sh'
 
       - name: Build server + plugin
