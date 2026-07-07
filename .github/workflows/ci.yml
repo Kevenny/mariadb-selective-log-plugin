@@ -21,7 +21,7 @@ jobs:
     name: Unit tests (filter_engine)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build and run standalone unit tests
         run: |
           g++ -std=c++11 -Wall -Wextra -Werror -I src \
@@ -57,7 +57,7 @@ jobs:
       BUILD_DIR: ${{ matrix.build_dir }}
       CCACHE_DIR: /opt/ccache
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Build toolchain image (Oracle Linux 8 + gcc-toolset-12)
         run: docker build -t sl-build -f docker/Dockerfile.ol8 .
@@ -80,16 +80,16 @@ jobs:
             sl-build sleep infinity
           docker exec -u root sl chown -R devuser:devuser \
             "$MARIADB_SRC_DIR" "$BUILD_DIR" /opt/ccache || true
-          docker exec sl bash -lc './scripts/download-mariadb-source.sh'
+          docker exec sl bash -lc 'bash scripts/download-mariadb-source.sh'
 
       - name: Build server + plugin
-        run: docker exec sl bash -lc './scripts/build.sh full'
+        run: docker exec sl bash -lc 'bash scripts/build.sh full'
 
       - name: Run MTR integration suite
-        run: docker exec sl bash -lc './scripts/run-mtr.sh --force'
+        run: docker exec sl bash -lc 'bash scripts/run-mtr.sh --force'
 
       - name: Package plugin artifact
-        run: docker exec sl bash -lc './scripts/build.sh --package'
+        run: docker exec sl bash -lc 'bash scripts/build.sh --package'
 
       - name: Upload plugin .so
         uses: actions/upload-artifact@v4

@@ -1,6 +1,6 @@
 # MariaDB Selective Trace Plugin (`selective_trace`)
 
-[![CI](https://github.com/Kevenny/mariadb-selective-log-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/Kevenny/mariadb-selective-log-plugin/actions/workflows/ci.yml)
+[![CI](https://github.com/Kevenny/mariadb-selective-trace-plugin/actions/workflows/ci.yml/badge.svg)](https://github.com/Kevenny/mariadb-selective-trace-plugin/actions/workflows/ci.yml)
 
 Native (open source, GPLv2) plugin for **MariaDB 11.4 and 12.3+** that does
 **selective query tracing** — it traces only queries touching specific
