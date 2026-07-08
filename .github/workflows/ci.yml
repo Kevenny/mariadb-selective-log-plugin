@@ -96,8 +96,8 @@ jobs:
           # already carries the env from docker run's -e, so do NOT pass -e to
           # exec (that would override them with empty values).
           docker exec -u root sl bash -c \
-            'mkdir -p "$MARIADB_SRC_DIR" "$BUILD_DIR" /opt/ccache &&
-             chown -R devuser:devuser "$MARIADB_SRC_DIR" "$BUILD_DIR" /opt/ccache'
+            'mkdir -p "$MARIADB_SRC_DIR" "$BUILD_DIR" /opt/ccache /opt/sl-out &&
+             chown -R devuser:devuser "$MARIADB_SRC_DIR" "$BUILD_DIR" /opt/ccache /opt/sl-out'
           docker exec sl bash -lc 'bash scripts/download-mariadb-source.sh'
 
       - name: Show resources before build
@@ -133,13 +133,19 @@ jobs:
         run: docker exec sl bash -lc 'bash scripts/run-mtr.sh --force'
 
       - name: Package plugin artifact
-        run: docker exec sl bash -lc 'bash scripts/build.sh --package'
+        run: |
+          # /workspace is owned by the runner user; devuser can't create
+          # build/ there. Package into a devuser-writable dir under /opt,
+          # then copy the .so out to the runner for upload.
+          docker exec sl bash -lc \
+            'PLUGIN_OUTPUT_DIR=/opt/sl-out bash scripts/build.sh --package'
+          docker cp sl:/opt/sl-out/selective_trace.so ./selective_trace.so
 
       - name: Upload plugin .so
         uses: actions/upload-artifact@v4
         with:
           name: selective_trace-${{ matrix.series }}.so
-          path: build/plugin_output/selective_trace.so
+          path: selective_trace.so
           if-no-files-found: error
 
       - name: Stop build container
